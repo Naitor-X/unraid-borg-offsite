@@ -187,47 +187,66 @@ PersistentKeepalive = 25
 
 ### 2.3 SSH-Key auf Unraid-Server hinterlegen
 
+> **Unraid-Spezifik:** `/etc/` ist auf Unraid ein RAM-Filesystem (tmpfs) — nach jedem Reboot leer.  
+> Alle persistenten Configs gehören nach `/boot/config/` (liegt auf dem USB-Stick).
+
 Den **Append-only Private Key** des Backup-Servers auf den Unraid-Server kopieren:
 ```bash
-mkdir -p /etc/borg-backup
-cp unraid1_borg /etc/borg-backup/ssh_key
-chmod 600 /etc/borg-backup/ssh_key
+mkdir -p /boot/config/borg-backup
+cp unraid1_borg /boot/config/borg-backup/ssh_key
+chmod 600 /boot/config/borg-backup/ssh_key
 ```
 
 SSH-Config anlegen damit Borg den richtigen Key und User verwendet:
 ```bash
-nano /root/.ssh/config
-```
-
-Eintragen:
-```
+mkdir -p /root/.ssh
+cat > /root/.ssh/config << 'EOF'
 Host 10.8.0.1
     User borg
-    IdentityFile /etc/borg-backup/ssh_key
+    IdentityFile /boot/config/borg-backup/ssh_key
     StrictHostKeyChecking accept-new
+EOF
+chmod 600 /root/.ssh/config
+```
+
+SSH-Config reboot-persistent machen (in `/boot/config/go` eintragen):
+```bash
+cat >> /boot/config/go << 'EOF'
+
+# Borg SSH-Config wiederherstellen
+mkdir -p /root/.ssh
+cp /boot/config/borg-backup/ssh_config /root/.ssh/config 2>/dev/null || true
+chmod 600 /root/.ssh/config 2>/dev/null || true
+EOF
+
+# SSH-Config auch unter /boot ablegen damit der go-Eintrag sie findet
+cp /root/.ssh/config /boot/config/borg-backup/ssh_config
 ```
 
 > **Wichtig:** `User borg` ist zwingend — sonst versucht Borg als `root` zu verbinden und der SSH-Key wird nicht akzeptiert.
 
 ### 2.4 `.env`-Datei anlegen
 
+`.env` direkt unter `/boot/` anlegen (überlebt Reboots):
 ```bash
-mkdir -p /etc/borg-backup
-cat > /etc/borg-backup/.env << 'EOF'
+mkdir -p /boot/config/borg-backup
+cat > /boot/config/borg-backup/.env << 'EOF'
 BORG_PASSPHRASE="langes-sicheres-passwort-hier"
 EOF
-chmod 600 /etc/borg-backup/.env
+chmod 600 /boot/config/borg-backup/.env
 ```
 
 **Wichtig:** Starkes, zufälliges Passwort wählen (min. 32 Zeichen).  
 Beispiel generieren: `openssl rand -base64 32`
+
+> `/etc/borg-backup/.env` funktioniert **nur bis zum nächsten Reboot** — nach einem Neustart ist `/etc/` leer.  
+> Das `borg-backup.sh` Script referenziert daher `/boot/config/borg-backup/.env`.
 
 ### 2.5 `borg-backup.sh` konfigurieren
 
 Die Vorlage `borg-backup.sh` anpassen — mindestens diese Werte setzen:
 - `hostname` — eindeutiger Name des Servers (z.B. `unraid1`)
 - `backup_jobs` — Quellpfade und Repo-URLs
-- `healthcheck_url` — Uptime Kuma Push-URL (optional)
 
 Das Script wird in Schritt 2.6 direkt über das User Scripts Plugin eingefügt.
 
@@ -425,3 +444,24 @@ borg delete /repos/unraid1::unraid1-appdata-2026-05-22T22:00.checkpoint
 
 Ohne Passphrase sind die Daten **unwiederbringlich verloren**.  
 → Ausgedruckten Zettel aus dem Safe holen.
+
+### PermissionError: `/repos/HOSTNAME/data/X/XXXX` (Backup-Server)
+
+**Symptom:** `borg info` oder `borg create` schlägt fehl mit `PermissionError: [Errno 13] Permission denied`.
+
+**Ursache:** `borg compact` und `borg prune` laufen auf dem Backup-Server als `root`. Neu erstellte Segment-, Index- und Hints-Dateien gehören dann `root:root` statt `borg:borg`. Der `borg`-SSH-User (der beim Backup-Client-Zugriff verwendet wird) kann diese Dateien nicht lesen.
+
+**Sofort-Fix** (auf dem Backup-Server als root):
+```bash
+find /repos/HOSTNAME -not -user borg -exec chown borg:borg {} +
+```
+
+**Dauerhafter Fix:** Im aktuellen `borg-prune.sh` ist dieser `find/chown` nach jedem `borg compact` bereits eingebaut — tritt nach dem nächsten Prune-Lauf nicht mehr auf.
+
+### WireGuard: "RTNETLINK answers: File exists" beim Backup-Start
+
+**Symptom:** Das Backup-Script schlägt beim WireGuard-Start fehl wenn das Interface bereits aktiv ist (z.B. nach manuellem `wg-quick up` oder einem vorherigen Script-Lauf).
+
+**Ursache:** Altes Script-Verhalten: `wg-quick up` wurde immer versucht, auch wenn das Interface schon oben war.
+
+**Fix:** Das aktuelle `borg-backup.sh` prüft per `ip link show` ob das Interface bereits aktiv ist und überspringt den Start in diesem Fall. Die Cleanup-Funktion trennt WireGuard außerdem nur dann, wenn das Script es selbst gestartet hat.

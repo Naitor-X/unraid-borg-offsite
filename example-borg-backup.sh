@@ -47,7 +47,7 @@ healthcheck_url=""                     # leer = deaktiviert
                                        # z.B.: https://uptime.example.com/api/push/abc123
 
 # ─── Secrets ──────────────────────────────────────────────────────────────────
-env_file="/etc/borg-backup/.env"       # enthält BORG_PASSPHRASE
+env_file="/boot/config/borg-backup/.env"       # enthält BORG_PASSPHRASE (persistent)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SCRIPT-LOGIK — Nichts unterhalb ändern
@@ -105,8 +105,10 @@ _notify_unraid() {
 }
 
 # ─── Cleanup / Trap ───────────────────────────────────────────────────────────
+wireguard_started_by_script=0
+
 _cleanup() {
-    if [[ "$wireguard_connect" -eq 1 ]]; then
+    if [[ "$wireguard_connect" -eq 1 && "$wireguard_started_by_script" -eq 1 ]]; then
         if ip link show "$wireguard_interface" &>/dev/null; then
             _log "INFO" "WireGuard trennen: ${wireguard_interface}"
             wg-quick down "$wireguard_interface" 2>>"$main_log" || true
@@ -143,13 +145,18 @@ _log "INFO" "Borg Backup gestartet auf ${hostname} (borg $(borg --version 2>/dev
 
 # ─── WireGuard verbinden ──────────────────────────────────────────────────────
 if [[ "$wireguard_connect" -eq 1 ]]; then
-    _log "INFO" "WireGuard verbinden: ${wireguard_interface}"
-    if ! wg-quick up "$wireguard_interface" 2>>"$main_log"; then
-        _log "ERROR" "WireGuard konnte nicht gestartet werden"
-        _notify_unraid "alert" "Borg Backup fehlgeschlagen" "WireGuard ${wireguard_interface} Start fehlgeschlagen"
-        exit 1
+    if ip link show "$wireguard_interface" &>/dev/null; then
+        _log "INFO" "WireGuard bereits aktiv: ${wireguard_interface}"
+    else
+        _log "INFO" "WireGuard verbinden: ${wireguard_interface}"
+        if ! wg-quick up "$wireguard_interface" 2>>"$main_log"; then
+            _log "ERROR" "WireGuard konnte nicht gestartet werden"
+            _notify_unraid "alert" "Borg Backup fehlgeschlagen" "WireGuard ${wireguard_interface} Start fehlgeschlagen"
+            exit 1
+        fi
+        wireguard_started_by_script=1
+        _log "INFO" "WireGuard verbunden"
     fi
-    _log "INFO" "WireGuard verbunden"
 fi
 
 # ─── Standard-Excludes ────────────────────────────────────────────────────────

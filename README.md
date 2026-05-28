@@ -43,8 +43,8 @@ Unraid Main-Server (1–n)          Offsite Backup-Server (Ubuntu)
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `borg-backup.sh` | Backup-Script für Unraid-Server — auf jedem Quell-Server anpassen und deployen |
-| `borg-prune.sh` | Prune & Wartung für den Ubuntu Backup-Server |
+| `example-borg-backup.sh` | Backup-Script (Vorlage) für Unraid-Server — auf jedem Quell-Server anpassen und deployen |
+| `example-borg-prune.sh` | Prune & Wartung (Vorlage) für den Ubuntu Backup-Server |
 | `.env.example` | Vorlage für Secrets (`BORG_PASSPHRASE`) |
 | `ANLEITUNG.md` | Vollständige Schritt-für-Schritt Einrichtungsanleitung |
 | `MIGRATION.md` | Anleitung für Migration von rsync auf Borg |

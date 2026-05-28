@@ -47,8 +47,7 @@ _log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] $*" | tee -a "$log_file"
 }
 
-# ─── .env laden & Passphrase per FD setzen ────────────────────────────────────
-# BORG_PASSPHRASE_FD: sicherer als BORG_PASSPHRASE — nicht in /proc/*/environ sichtbar
+# ─── .env laden & Passphrase setzen ──────────────────────────────────────────
 if [[ ! -f "$env_file" ]]; then
     _log "ERROR" ".env nicht gefunden: ${env_file}"
     exit 1
@@ -60,11 +59,7 @@ if [[ -z "${BORG_PASSPHRASE:-}" ]]; then
     _log "ERROR" "BORG_PASSPHRASE nicht gesetzt in ${env_file}"
     exit 1
 fi
-
-# Passphrase in temporären FD schreiben
-exec {BORG_PASSPHRASE_FD}< <(echo "$BORG_PASSPHRASE")
-export BORG_PASSPHRASE_FD
-unset BORG_PASSPHRASE
+export BORG_PASSPHRASE
 
 # ─── Borg-Binary prüfen ───────────────────────────────────────────────────────
 if ! command -v borg &>/dev/null; then
@@ -145,6 +140,10 @@ while [[ $i -lt ${#prune_jobs[@]} ]]; do
     else
         _log "WARN" "Compact fehlgeschlagen (unkritisch): ${repo_path}"
     fi
+    # Compact läuft als root → neu erstellte Dateien gehören root statt borg.
+    # SSH-Clients (borg-User) können root-Dateien nicht lesen → Backups schlagen fehl.
+    find "$repo_path" -not -user borg -exec chown borg:borg {} + 2>>"$log_file" || true
+    _log "INFO" "Ownership-Check abgeschlossen: ${repo_path}"
 
     # c) borg info (Statistik ins Log)
     _log "INFO" "Statistik für: ${repo_path}"
